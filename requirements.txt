@@ -1,0 +1,18 @@
+# --- LLM providers (chỉ cần cài SDK của provider bạn thực sự dùng) ---
+anthropic>=0.40.0          # nếu dùng Claude API
+google-genai>=0.3.0        # nếu dùng Gemini API (SDK mới, thay cho google-generativeai)
+
+# --- Core pipeline ([1]-[4]) ---
+pydantic>=2.6              # (tùy chọn) thay dataclass thuần bằng pydantic để validate mạnh hơn
+python-dotenv>=1.0         # đọc .env cho API key, tránh hardcode
+
+# --- [5] Human review gate ---
+streamlit>=1.38            # UI duyệt nhanh, ít code nhất
+# hoặc: flask>=3.0 + flask-wtf nếu muốn tích hợp vào hệ thống web nội bộ có sẵn
+
+# --- [6] Export ---
+python-docx>=1.1           # xuất .docx
+markdown>=3.6              # hỗ trợ xuất .md có kiểm tra định dạng
+
+# --- Testing ---
+pytest>=8.0
