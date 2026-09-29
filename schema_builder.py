@@ -1,9 +1,4 @@
-"""
-[1] Schema builder
--------------------
-Tham số hóa kịch bản đào tạo nhận diện Social Engineering.
-Mọi trường đầu vào là ENUM ĐÓNG để giảm bề mặt prompt-injection.
-"""
+"""[1] Schema builder — tham số hóa kịch bản đào tạo."""
 
 from __future__ import annotations
 
@@ -17,8 +12,8 @@ class AttackType(str, Enum):
     PHISHING_EMAIL = "phishing_email"
     VISHING = "vishing"
     SMISHING = "smishing"
-    BEC = "bec"                # Business Email Compromise -> Nhóm 1: Giả danh lãnh đạo
-    PRETEXTING = "pretexting"  # -> Nhóm 2: Giả danh IT/Helpdesk
+    BEC = "bec"
+    PRETEXTING = "pretexting"
     TAILGATING = "tailgating"
     QUID_PRO_QUO = "quid_pro_quo"
 
@@ -30,7 +25,7 @@ class LearnerRole(str, Enum):
     RECEPTIONIST = "le_tan"
     NEW_HIRE = "nhan_vien_moi"
     HR_STAFF = "nhan_vien_hr"
-    OFFICE_STAFF = "nhan_vien_van_phong"   # MỚI — vai trò chung cho nhóm IT/Helpdesk và Ngân hàng
+    OFFICE_STAFF = "nhan_vien_van_phong"
 
 
 class BusinessContext(str, Enum):
@@ -40,10 +35,9 @@ class BusinessContext(str, Enum):
     INVOICE_PROCESSING = "xu_ly_hoa_don"
     RECRUITMENT = "tuyen_dung"
     VENDOR_ONBOARDING = "onboard_nha_cung_cap"
-    # MỚI — 3 giá trị bổ sung cho Nhóm 2 (IT/Helpdesk) và Nhóm 3 (Ngân hàng)
-    ACCOUNT_SECURITY_ALERT = "canh_bao_bao_mat_tai_khoan"      # "phát hiện hoạt động bất thường"
-    REMOTE_IT_SUPPORT = "ho_tro_ky_thuat_tu_xa"                 # yêu cầu cài phần mềm điều khiển từ xa
-    BANK_TRANSACTION_VERIFICATION = "xac_minh_giao_dich_ngan_hang"  # yêu cầu đọc mã OTP/MFA
+    ACCOUNT_SECURITY_ALERT = "canh_bao_bao_mat_tai_khoan"
+    REMOTE_IT_SUPPORT = "ho_tro_ky_thuat_tu_xa"
+    BANK_TRANSACTION_VERIFICATION = "xac_minh_giao_dich_ngan_hang"
 
 
 class ManipulationMechanism(str, Enum):
@@ -61,6 +55,14 @@ class DifficultyLevel(str, Enum):
     ADVANCED = "advanced"
 
 
+class CompetencyGroup(str, Enum):
+    """4 nhóm năng lực theo mục 3.6.2 — người dùng chọn TRƯỚC, LLM phải bám đúng."""
+    SIGN_RECOGNITION = "nhan_dien_dau_hieu"                    # Phần I
+    MANIPULATION_RECOGNITION = "nhan_biet_co_che_thao_tung"    # Phần II
+    RESPONSE_BEHAVIOR = "lua_chon_hanh_vi_ung_pho"             # Phần III
+    PRINCIPLE_APPLICATION = "van_dung_nguyen_tac"              # Phần IV
+
+
 class OutputFormat(str, Enum):
     JSON = "json"
     MARKDOWN = "markdown"
@@ -71,11 +73,6 @@ class SchemaValidationError(ValueError):
     pass
 
 
-# Ràng buộc nghiệp vụ: số red flag tối thiểu/tối đa theo độ khó.
-# Nâng cận trên của "advanced" từ 3 lên 4 vì tài liệu tham khảo cho thấy
-# kịch bản nâng cao thường kết hợp 4 nhóm dấu hiệu tinh vi cùng lúc
-# (chuỗi email giả lập, văn phong tự nhiên, kết hợp nhiều nguyên tắc tâm lý,
-# kênh xác minh không chính thống).
 _RED_FLAG_BOUNDS: dict[DifficultyLevel, tuple[int, int]] = {
     DifficultyLevel.BEGINNER: (3, 6),
     DifficultyLevel.INTERMEDIATE: (2, 4),
@@ -92,6 +89,7 @@ class ScenarioParams:
     business_context: BusinessContext
     manipulation_mechanism: ManipulationMechanism
     difficulty_level: DifficultyLevel
+    competency_group: CompetencyGroup
     red_flags_required: int
     language: str = "vi"
     output_format: OutputFormat = OutputFormat.JSON
@@ -112,6 +110,7 @@ def build_scenario_params(
     business_context: str,
     manipulation_mechanism: str,
     difficulty_level: str,
+    competency_group: str,
     red_flags_required: int,
     language: str = "vi",
     output_format: str = "json",
@@ -132,10 +131,11 @@ def build_scenario_params(
     business_context_e = _coerce_enum(BusinessContext, business_context, "business_context")
     manipulation_e = _coerce_enum(ManipulationMechanism, manipulation_mechanism, "manipulation_mechanism")
     difficulty_e = _coerce_enum(DifficultyLevel, difficulty_level, "difficulty_level")
+    competency_e = _coerce_enum(CompetencyGroup, competency_group, "competency_group")
     output_format_e = _coerce_enum(OutputFormat, output_format, "output_format")
 
     if language not in _SUPPORTED_LANGUAGES:
-        errors.append(f"language='{language}' không hợp lệ. Chỉ hỗ trợ: {_SUPPORTED_LANGUAGES}")
+        errors.append(f"language='{language}' không hợp lệ.")
 
     if not isinstance(red_flags_required, int):
         errors.append("red_flags_required phải là số nguyên")
@@ -143,12 +143,12 @@ def build_scenario_params(
         lo, hi = _RED_FLAG_BOUNDS[difficulty_e]
         if not (lo <= red_flags_required <= hi):
             errors.append(
-                f"red_flags_required={red_flags_required} không phù hợp với "
-                f"difficulty_level={difficulty_e.value} (yêu cầu {lo}-{hi})"
+                f"red_flags_required={red_flags_required} không phù hợp difficulty_level="
+                f"{difficulty_e.value} (yêu cầu {lo}-{hi})"
             )
 
     if requester_note and len(requester_note) > 500:
-        errors.append("requester_note quá dài (>500 ký tự)")
+        errors.append("requester_note quá dài")
 
     if errors:
         raise SchemaValidationError("; ".join(errors))
@@ -159,20 +159,9 @@ def build_scenario_params(
         business_context=business_context_e,
         manipulation_mechanism=manipulation_e,
         difficulty_level=difficulty_e,
+        competency_group=competency_e,
         red_flags_required=red_flags_required,
         language=language,
         output_format=output_format_e,
         requester_note=requester_note,
     )
-
-
-if __name__ == "__main__":
-    params = build_scenario_params(
-        attack_type="pretexting",
-        learner_role="nhan_vien_van_phong",
-        business_context="ho_tro_ky_thuat_tu_xa",
-        manipulation_mechanism="fear_intimidation",
-        difficulty_level="advanced",
-        red_flags_required=4,
-    )
-    print(params.to_dict())

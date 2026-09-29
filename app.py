@@ -1,14 +1,6 @@
 """
-app.py
--------
-Giao diện web (Streamlit), 3 tab:
-  Tab 1: Sinh kịch bản — chọn tham số qua dropdown, gọi pipeline [1]->[4].
-  Tab 2: Duyệt kịch bản — Human review gate [5], chuyên gia duyệt/từ chối.
-  Tab 3: Học viên làm bài — luồng 3 lớp Challenge -> Explanation -> Transferable
-         Knowledge; đáp án/giải thích CHỈ hiện ra SAU khi học viên đã chọn.
-
-Chạy:
-    streamlit run app.py
+app.py — 3 tab: Sinh kịch bản / Duyệt kịch bản / (Học viên làm bài - đã ẩn).
+Chạy: streamlit run app.py
 """
 
 from __future__ import annotations
@@ -21,6 +13,7 @@ from schema_builder import (
     BusinessContext,
     ManipulationMechanism,
     DifficultyLevel,
+    CompetencyGroup,
     _RED_FLAG_BOUNDS,
 )
 from pipeline import run_pipeline
@@ -69,9 +62,14 @@ LABELS = {
         "intermediate": "Intermediate (trung bình)",
         "advanced": "Advanced (nâng cao)",
     },
+    CompetencyGroup: {
+        "nhan_dien_dau_hieu": "Nhận diện dấu hiệu cảnh báo",
+        "nhan_biet_co_che_thao_tung": "Nhận biết cơ chế thao túng tâm lý",
+        "lua_chon_hanh_vi_ung_pho": "Lựa chọn hành vi ứng phó",
+        "van_dung_nguyen_tac": "Vận dụng nguyên tắc phòng vệ",
+    },
 }
 
-# Nhãn hiển thị cho tier của từng red flag — dùng chung cho cả admin preview và learner view
 TIER_LABELS = {
     "co_ban": "🟢 Cơ bản",
     "trung_binh": "🟡 Trung bình",
@@ -87,10 +85,6 @@ def select_enum(enum_cls, label: str, key: str) -> str:
     return options[idx].value
 
 
-# ---------------------------------------------------------------------------
-# Tab 1 — Sinh kịch bản
-# ---------------------------------------------------------------------------
-
 def render_generate_tab() -> None:
     st.subheader("Sinh kịch bản đào tạo (3 lớp)")
 
@@ -102,6 +96,7 @@ def render_generate_tab() -> None:
     with col2:
         learner_role = select_enum(LearnerRole, "Vai trò người học", "learner_role")
         manipulation_mechanism = select_enum(ManipulationMechanism, "Cơ chế thao túng tâm lý", "manipulation_mechanism")
+        competency_group = select_enum(CompetencyGroup, "Nhóm năng lực", "competency_group")
 
     lo, hi = _RED_FLAG_BOUNDS[DifficultyLevel(difficulty_level)]
     red_flags_required = st.slider(f"Số lượng red flags ({lo}-{hi})", min_value=lo, max_value=hi, value=lo)
@@ -114,6 +109,7 @@ def render_generate_tab() -> None:
                 business_context=business_context,
                 manipulation_mechanism=manipulation_mechanism,
                 difficulty_level=difficulty_level,
+                competency_group=competency_group,
                 red_flags_required=red_flags_required,
             )
         render_generation_result(outcome)
@@ -142,9 +138,9 @@ def render_generation_result(outcome) -> None:
 
 
 def render_admin_preview(llm_output: dict, issues: list, key_prefix: str) -> None:
-    """Xem trước ĐẦY ĐỦ cả 3 lớp — dùng cho người sinh/người duyệt, KHÔNG dùng cho học viên."""
     st.markdown(f"### {llm_output['title']}")
-    st.caption(f"Kênh: {llm_output['channel']} · Độ khó: {llm_output['difficulty_level']}")
+    competency_label = LABELS[CompetencyGroup].get(llm_output.get("primary_competency"), "")
+    st.caption(f"Kênh: {llm_output['channel']} · Độ khó: {llm_output['difficulty_level']} · Nhóm năng lực: {competency_label}")
 
     l1 = llm_output["layer1_challenge"]
     st.markdown("**Lớp 1 — Challenge**")
@@ -174,10 +170,6 @@ def render_admin_preview(llm_output: dict, issues: list, key_prefix: str) -> Non
         for issue in issues:
             st.write(f"🟡 {issue['field']}: {issue['message']}")
 
-
-# ---------------------------------------------------------------------------
-# Tab 2 — Duyệt kịch bản (Human review gate)
-# ---------------------------------------------------------------------------
 
 def render_review_tab() -> None:
     st.subheader("Hàng đợi chờ duyệt")
@@ -225,116 +217,15 @@ def render_review_tab() -> None:
                 st.caption(f"Ghi chú: {item.review_note}")
 
 
-# ---------------------------------------------------------------------------
-# Tab 3 — Học viên làm bài (luồng 3 lớp thật sự, ẩn đáp án cho tới khi chọn)
-# ---------------------------------------------------------------------------
-
-def render_learner_tab() -> None:
-    st.subheader("Làm bài đánh giá nhận diện Social Engineering")
-
-    approved = review_store.list_approved_scenarios()
-    if not approved:
-        st.info("Chưa có bài tập nào được duyệt để đưa vào luyện tập.")
-        return
-
-    learner_name = st.text_input("Tên học viên", key="learner_name")
-    titles = [s.llm_output["title"] for s in approved]
-    chosen_title = st.selectbox("Chọn bài tập", titles, key="learner_scenario_choice")
-    scenario = approved[titles.index(chosen_title)]
-    sid = scenario.scenario_id
-    llm_output = scenario.llm_output
-    l1 = llm_output["layer1_challenge"]
-
-    answered_key = f"answered_{sid}"
-    chosen_key = f"chosen_{sid}"
-
-    st.markdown("---")
-    st.markdown(f"### {llm_output['title']}")
-    st.caption(f"Kênh: {llm_output['channel']} · Độ khó: {llm_output['difficulty_level']}")
-
-    st.markdown("#### 🎯 Lớp 1 — Tình huống")
-    st.text_area("", l1["narrative"], height=220, disabled=True, key=f"learner_narrative_{sid}")
-    st.write(f"**{l1['decision_prompt']}**")
-
-    option_labels = [f"{opt['option_id']}. {opt['text']}" for opt in l1["options"]]
-
-    if not st.session_state.get(answered_key, False):
-        picked = st.radio("Chọn hành động của bạn:", option_labels, key=f"radio_{sid}", index=None)
-
-        if st.button("Xác nhận câu trả lời", key=f"submit_{sid}", disabled=(picked is None)):
-            if not learner_name.strip():
-                st.error("Vui lòng nhập tên học viên trước khi nộp bài.")
-            else:
-                chosen_option_id = picked.split(".")[0]
-                st.session_state[answered_key] = True
-                st.session_state[chosen_key] = chosen_option_id
-                st.rerun()
-    else:
-        chosen_option_id = st.session_state[chosen_key]
-        chosen_opt = next(o for o in l1["options"] if o["option_id"] == chosen_option_id)
-
-        recorded_key = f"recorded_{sid}"
-        if not st.session_state.get(recorded_key, False):
-            review_store.record_attempt(
-                scenario_id=sid,
-                learner_name=learner_name.strip() or "(chưa đặt tên)",
-                chosen_option_id=chosen_option_id,
-                is_safe_choice=chosen_opt["is_safe_choice"],
-                score=int(chosen_opt["score"]),
-            )
-            st.session_state[recorded_key] = True
-
-        if chosen_opt["is_safe_choice"]:
-            st.success(f"Bạn chọn: {chosen_option_id}. {chosen_opt['text']}  →  Điểm: {chosen_opt['score']}/100 ✅")
-        elif chosen_opt["score"] >= 40:
-            st.warning(f"Bạn chọn: {chosen_option_id}. {chosen_opt['text']}  →  Điểm: {chosen_opt['score']}/100 ⚠️")
-        else:
-            st.error(f"Bạn chọn: {chosen_option_id}. {chosen_opt['text']}  →  Điểm: {chosen_opt['score']}/100 ❌")
-
-        l2 = llm_output["layer2_explanation"]
-        st.markdown("#### 📖 Lớp 2 — Giải thích")
-        for fb in l2["option_feedback"]:
-            marker = "👉 " if fb["option_id"] == chosen_option_id else "• "
-            st.write(f"{marker}**{fb['option_id']}**: {fb['explanation']}")
-
-        st.markdown("**Các dấu hiệu nhận biết (red flags) trong tình huống này:**")
-        for rf in l2["red_flags"]:
-            tier = TIER_LABELS.get(rf.get("tier"), "")
-            st.write(f"- {tier} **{rf['flag']}** — {rf['explanation']}")
-
-        l3 = llm_output["layer3_transferable_knowledge"]
-        st.markdown("#### 🧠 Lớp 3 — Nguyên tắc chuyển giao")
-        st.info(l3["principle"])
-        st.write(f"**Áp dụng được cho:** {', '.join(l3['applicable_situations'])}")
-        st.write(f"**Ghi nhớ:** {l3['general_advice']}")
-
-        if st.button("Làm bài tập khác", key=f"reset_{sid}"):
-            st.session_state[answered_key] = False
-            st.session_state[recorded_key] = False
-            st.rerun()
-
-    if learner_name.strip():
-        st.divider()
-        summary = review_store.get_learner_summary(learner_name.strip())
-        if summary["count"] > 0:
-            st.markdown("#### 📊 Kết quả luyện tập của bạn")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Số bài đã làm", summary["count"])
-            c2.metric("Điểm trung bình", summary["average_score"])
-            c3.metric("Tỷ lệ chọn an toàn", f"{summary['safe_choice_rate']}%")
-
-
 def main() -> None:
     st.set_page_config(page_title="SE Training Scenario Generator", layout="wide")
     st.title("🎯 Công cụ đào tạo nhận diện Social Engineering")
 
-    tab1, tab2, tab3 = st.tabs(["🛠️ Sinh kịch bản", "📋 Duyệt kịch bản", "🎓 Học viên làm bài"])
+    tab1, tab2 = st.tabs(["🛠️ Sinh kịch bản", "📋 Duyệt kịch bản"])
     with tab1:
         render_generate_tab()
     with tab2:
         render_review_tab()
-    with tab3:
-        render_learner_tab()
 
 
 if __name__ == "__main__":
