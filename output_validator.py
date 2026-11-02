@@ -265,9 +265,29 @@ def _collect_text_leaves(obj: Any, path: str = "") -> list[tuple[str, str]]:
     return out
 
 
+# Placeholder tên/tổ chức/tên miền còn sót, vd "[Tên TGĐ giả]", "[Tên của bạn]",
+# "[Công ty giả định]", "[ten-mien-gia-lap.vn]". Đề kiểm tra phải dùng tên cụ thể nên đây là lỗi.
+# KHÔNG bắt nhãn nút/liên kết giả hợp lệ như "[Xác minh tài khoản ngay]".
+_LEFTOVER_PLACEHOLDER_PATTERNS = [
+    re.compile(r"\[\s*tên\b[^\]]*\]", re.IGNORECASE),
+    re.compile(r"\[[^\]]*giả định[^\]]*\]", re.IGNORECASE),
+    re.compile(r"\[\s*ten[-\s][^\]]*\]", re.IGNORECASE),
+]
+# Nhãn ô nhập liệu hợp lệ trong email giả lập (vd "[Tên đăng nhập]") không phải placeholder tên người.
+_PLACEHOLDER_FALSE_POSITIVE = re.compile(r"đăng nhập|tài khoản|mật khẩu|người dùng", re.IGNORECASE)
+
+
 def _scan_content_safety(data: dict) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     for field_path, text in _collect_text_leaves(data):
+        reported_spans: set[tuple[int, int]] = set()
+        for pattern in _LEFTOVER_PLACEHOLDER_PATTERNS:
+            for m in pattern.finditer(text):
+                if m.span() in reported_spans or _PLACEHOLDER_FALSE_POSITIVE.search(m.group()):
+                    continue
+                reported_spans.add(m.span())
+                _err(issues, field_path,
+                     f"Còn placeholder chưa thay bằng tên cụ thể: '{m.group()}'")
         for pattern in _REAL_BRAND_DOMAIN_PATTERNS:
             if re.search(pattern, text, re.IGNORECASE):
                 _err(issues, field_path, f"Phát hiện domain/thương hiệu thật khớp mẫu '{pattern}'")
@@ -286,9 +306,47 @@ def _scan_content_safety(data: dict) -> list[ValidationIssue]:
     return issues
 
 
+# Token dạng tên miền trong văn bản, vd "luminaviet.vn", "luminaviet-corp.com" (kể cả sau dấu @).
+_DOMAIN_TOKEN = re.compile(
+    r"(?<![\w.-])[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:vn|com|net|org|co|info|xyz|io|biz|top)\b",
+    re.IGNORECASE,
+)
+
+
+def _check_domain_self_contained(data: dict) -> list[ValidationIssue]:
+    """Heuristic "tự đủ dữ kiện": nếu đáp án đúng/red flag dựa trên so sánh TÊN MIỀN thì narrative
+    phải nêu được ít nhất 2 tên miền (chính thức + đáng ngờ) để học viên có căn cứ đối chiếu.
+    Chỉ cảnh báo (không chặn) vì narrative có thể mô tả bằng lời (vd 'chỉ khác một dấu gạch ngang')."""
+    l1, l2 = data.get("layer1_challenge"), data.get("layer2_explanation")
+    if not isinstance(l1, dict) or not isinstance(l2, dict):
+        return []
+    narrative = l1.get("narrative") if isinstance(l1.get("narrative"), str) else ""
+
+    texts: list[str] = []
+    for opt in l1.get("options") or []:
+        if isinstance(opt, dict) and opt.get("is_safe_choice") is True and isinstance(opt.get("text"), str):
+            texts.append(opt["text"])
+    for rf in l2.get("red_flags") or []:
+        if isinstance(rf, dict):
+            texts += [v for v in (rf.get("flag"), rf.get("explanation")) if isinstance(v, str)]
+    if not any("tên miền" in t.lower() for t in texts):
+        return []
+
+    domains = {m.group().lower() for m in _DOMAIN_TOKEN.finditer(narrative)}
+    if len(domains) >= 2:
+        return []
+    return [ValidationIssue(
+        "warning", "layer1_challenge.narrative",
+        f"Đáp án/red flag dựa trên tên miền nhưng narrative chỉ nêu {len(domains)} tên miền "
+        f"({', '.join(sorted(domains)) or 'không có'}) — học viên thiếu mốc tên miền chính thức "
+        f"để đối chiếu. Kiểm tra lại: narrative cần nêu cả tên miền chính thức lẫn tên miền người gửi."
+    )]
+
+
 def validate_output(data: dict, params: ScenarioParams) -> ValidationResult:
     issues = _validate_schema(data, params)
     if not any(i.field == "refusal" for i in issues):
         issues += _scan_content_safety(data)
+        issues += _check_domain_self_contained(data)
     has_error = any(i.severity == "error" for i in issues)
     return ValidationResult(is_valid=not has_error, issues=issues, normalized_output=data if not has_error else None)
