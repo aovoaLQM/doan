@@ -7,7 +7,7 @@ pydantic>=2.6              # (tùy chọn) thay dataclass thuần bằng pydanti
 python-dotenv>=1.0         # đọc .env cho API key, tránh hardcode
 
 # --- [5] Human review gate ---
-streamlit>=1.38            # UI duyệt nhanh, ít code nhất
+streamlit>=1.64            # Tabs chỉ tải nội dung khi được chọn
 # hoặc: flask>=3.0 + flask-wtf nếu muốn tích hợp vào hệ thống web nội bộ có sẵn
 
 # --- [6] Export ---

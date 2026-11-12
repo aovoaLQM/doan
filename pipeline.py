@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Any
 
 from schema_builder import build_scenario_params, ScenarioParams, SchemaValidationError
@@ -17,6 +17,7 @@ class PipelineOutcome:
     llm_result: Optional[LLMCallResult] = None
     validation: Optional[ValidationResult] = None
     error_message: Optional[str] = None
+    attempts: list[dict[str, str]] = field(default_factory=list)
 
     def to_review_payload(self) -> dict[str, Any]:
         return {
@@ -29,6 +30,8 @@ class PipelineOutcome:
                 for i in (self.validation.issues if self.validation else [])
             ],
             "error_message": self.error_message,
+            "model": self.llm_result.model if self.llm_result else None,
+            "attempts": self.llm_result.attempts if self.llm_result else self.attempts,
             "requires_manual_approval": self.status == "ready_for_review",
         }
 
@@ -61,11 +64,13 @@ def run_pipeline(
     except SchemaValidationError as e:
         return PipelineOutcome(status="input_rejected", error_message=str(e))
 
+    llm_result = None
     try:
         llm_result = call_llm(params)
         parsed = parse_llm_json(llm_result)
     except LLMCallError as e:
-        return PipelineOutcome(status="llm_error", params=params, error_message=str(e))
+        return PipelineOutcome(status="llm_error", params=params, llm_result=llm_result,
+                               error_message=str(e), attempts=e.attempts)
 
     validation = validate_output(parsed, params)
     status = "ready_for_review" if validation.is_valid else "validation_failed"

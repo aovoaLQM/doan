@@ -103,6 +103,9 @@ LABELS[BusinessContext].update({
     "ra_vao_van_phong": "Ra vào văn phòng (tailgating)",
     "thiet_bi_ma_qr_la": "Thiết bị / mã QR lạ",
     "khao_sat_nhan_qua": "Khảo sát nhận quà",
+    "dong_nghiep_nho_ho_tro": "Đồng nghiệp nhờ hỗ trợ công việc",
+    "dang_ky_cong_doan_phuc_loi": "Đăng ký công đoàn / phúc lợi",
+    "mua_ban_thanh_ly_noi_bo": "Mua bán / thanh lý nội bộ",
 })
 LABELS[ScenarioGroup] = {
     "gia_danh_lanh_dao": "Giả danh lãnh đạo (CEO Fraud / BEC)",
@@ -118,12 +121,18 @@ TIER_LABELS = {
 }
 
 
-def select_enum(enum_cls, label: str, key: str, allowed=None) -> str:
+def select_enum(enum_cls, label: str, key: str, allowed=None, on_change=None) -> str:
     options = list(allowed) if allowed is not None else list(enum_cls)
-    display_labels = [LABELS[enum_cls][o.value] for o in options]
-    choice = st.selectbox(label, display_labels, key=key)
-    idx = display_labels.index(choice)
-    return options[idx].value
+    values = [option.value for option in options]
+    if st.session_state.get(key) not in values:
+        st.session_state[key] = values[0]
+    return st.selectbox(label, values, format_func=lambda value: LABELS[enum_cls][value],
+                        key=key, on_change=on_change)
+
+
+def reset_generation_choices(*keys) -> None:
+    for key in keys:
+        st.session_state.pop(key, None)
 
 
 def render_generate_tab() -> None:
@@ -137,24 +146,29 @@ def render_generate_tab() -> None:
     r4c1, _ = st.columns(2)      # Cơ chế thao túng tâm lý
 
     with r3c2:
-        competency_group = select_enum(CompetencyGroup, "Nhóm năng lực", "competency_group")
+        competency_group = select_enum(
+            CompetencyGroup, "Nhóm năng lực", "competency_group",
+            on_change=lambda: reset_generation_choices("scenario_group", "business_context", "attack_type"),
+        )
     comp = CompetencyGroup(competency_group)
 
     with r1c1:
         scenario_group = select_enum(
-            ScenarioGroup, "Nhóm kịch bản", f"scenario_group_{competency_group}",
+            ScenarioGroup, "Nhóm kịch bản", "scenario_group",
             allowed=allowed_groups(comp),
+            on_change=lambda: reset_generation_choices("business_context", "attack_type"),
         )
     group = ScenarioGroup(scenario_group)
 
     with r1c2:
         business_context = select_enum(
-            BusinessContext, "Bối cảnh nghiệp vụ", f"business_context_{scenario_group}",
+            BusinessContext, "Bối cảnh nghiệp vụ", "business_context",
             allowed=allowed_contexts(group),
+            on_change=lambda: reset_generation_choices("attack_type"),
         )
     with r2c1:
         attack_type = select_enum(
-            AttackType, "Loại tấn công (kênh / kỹ thuật)", f"attack_type_{business_context}",
+            AttackType, "Loại tấn công (kênh / kỹ thuật)", "attack_type",
             allowed=allowed_attacks(BusinessContext(business_context)),
         )
     with r2c2:
@@ -164,16 +178,17 @@ def render_generate_tab() -> None:
     with r4c1:
         manipulation_mechanism = select_enum(ManipulationMechanism, "Cơ chế thao túng tâm lý", "manipulation_mechanism")
 
-    if comp == CompetencyGroup.PRINCIPLE_APPLICATION:
-        st.caption("Phần IV (vận dụng nguyên tắc, tình huống chưa huấn luyện trực tiếp) chỉ dùng nhóm kịch bản \"Khác\".")
+    if comp in (CompetencyGroup.RESPONSE_BEHAVIOR, CompetencyGroup.PRINCIPLE_APPLICATION):
+        st.caption("Phần III–IV cho phép cả 4 nhóm kịch bản: Lãnh đạo, IT, Ngân hàng và Khác.")
     else:
-        st.caption("Phần I–III dùng 3 nhóm huấn luyện chính. Nhóm \"Khác\" dành cho Phần IV.")
+        st.caption("Phần I–II dùng 3 nhóm huấn luyện chính. Nhóm \"Khác\" dành cho Phần III–IV.")
 
     lo, hi = _RED_FLAG_BOUNDS[DifficultyLevel(difficulty_level)]
     red_flags_required = st.slider(f"Số lượng red flags ({lo}-{hi})", min_value=lo, max_value=hi, value=lo)
 
     if st.button("🚀 Sinh kịch bản", type="primary"):
-        with st.spinner("Đang gọi LLM để sinh bài tập 3 lớp..."):
+        with st.status("Đang sinh kịch bản...", expanded=True) as generation_status:
+            st.write("Đang gửi yêu cầu tới LLM và kiểm tra kết quả. Khi dịch vụ quá tải, việc tự thử lại có thể mất vài phút.")
             outcome = run_pipeline(
                 attack_type=attack_type,
                 learner_role=learner_role,
@@ -184,12 +199,25 @@ def render_generate_tab() -> None:
                 scenario_group=scenario_group,
                 red_flags_required=red_flags_required,
             )
+            generation_status.update(
+                label="Đã sinh và kiểm tra kịch bản" if outcome.status == "ready_for_review" else "Không thể hoàn tất sinh kịch bản — xem thông báo bên dưới",
+                state="complete" if outcome.status == "ready_for_review" else "error",
+                expanded=False,
+            )
         render_generation_result(outcome)
 
 
 def render_generation_result(outcome) -> None:
     payload = outcome.to_review_payload()
     status = payload["status"]
+    attempts = payload.get("attempts", [])
+    if payload.get("model"):
+        st.caption(f"Model tạo kết quả: {payload['model']}")
+    if len(attempts) > 1 and payload.get("model"):
+        st.info(f"Đã chuyển sang model dự phòng: {payload['model']}.")
+    if attempts:
+        with st.expander("Lịch sử gọi model"):
+            st.table(attempts)
 
     if status == "input_rejected":
         st.error(f"Tham số đầu vào không hợp lệ: {payload['error_message']}")
@@ -405,13 +433,19 @@ def main() -> None:
     st.set_page_config(page_title="SE Training Scenario Generator", layout="wide")
     st.title("🎯 Công cụ đào tạo nhận diện Social Engineering")
 
-    tab1, tab2, tab3 = st.tabs(["🛠️ Sinh kịch bản", "📋 Duyệt kịch bản", "🧪 Preview Test"])
+    tab1, tab2, tab3 = st.tabs(
+        ["🛠️ Sinh kịch bản", "📋 Duyệt kịch bản", "🧪 Preview Test"],
+        key="main_tab", on_change="rerun",
+    )
     with tab1:
-        render_generate_tab()
+        if tab1.open:
+            render_generate_tab()
     with tab2:
-        render_review_tab()
+        if tab2.open:
+            render_review_tab()
     with tab3:
-        render_preview_test_tab()
+        if tab3.open:
+            render_preview_test_tab()
 
 
 if __name__ == "__main__":

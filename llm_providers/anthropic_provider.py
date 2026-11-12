@@ -6,12 +6,14 @@ from typing import Optional
 import anthropic
 
 from .base import LLMProvider, LLMCallResult, LLMCallError
+from .errors import normalize_error
 
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self, model: str = "claude-sonnet-4-6", api_key: Optional[str] = None):
+    def __init__(self, model: str = "claude-sonnet-4-6", api_key: Optional[str] = None, *, fallback_mode: bool = False):
         self.model = model
-        self.client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
+        options = {"max_retries": 0, "timeout": 60.0} if fallback_mode else {}
+        self.client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"), **options)
 
     def generate(self, system_prompt: str, user_prompt: str, max_tokens: int = 2000) -> LLMCallResult:
         try:
@@ -22,7 +24,7 @@ class AnthropicProvider(LLMProvider):
                 messages=[{"role": "user", "content": user_prompt}],
             )
         except Exception as e:  # noqa: BLE001
-            raise LLMCallError(f"Lỗi gọi Anthropic API: {e}") from e
+            raise normalize_error(e, "anthropic", self.model) from e
 
         text_blocks = [b.text for b in response.content if getattr(b, "type", None) == "text"]
         raw_text = "\n".join(text_blocks).strip()

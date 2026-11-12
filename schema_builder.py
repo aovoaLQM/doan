@@ -60,6 +60,9 @@ class BusinessContext(str, Enum):
     PHYSICAL_ACCESS = "ra_vao_van_phong"
     BAITING_DEVICE = "thiet_bi_ma_qr_la"
     SURVEY_REWARD = "khao_sat_nhan_qua"
+    COLLEAGUE_SUPPORT = "dong_nghiep_nho_ho_tro"
+    EMPLOYEE_BENEFITS = "dang_ky_cong_doan_phuc_loi"
+    INTERNAL_RESALE = "mua_ban_thanh_ly_noi_bo"
 
 
 class ManipulationMechanism(str, Enum):
@@ -106,8 +109,7 @@ class SchemaValidationError(ValueError):
 # ---------------------------------------------------------------------------
 # Chuỗi lựa chọn phụ thuộc:  Nhóm năng lực -> Nhóm kịch bản -> Bối cảnh -> Loại tấn công (kênh/kỹ thuật)
 # Mục đích: chặn tổ hợp mâu thuẫn ngay từ đầu để LLM không phải đoán ai giả danh ai.
-#   - Phần I-III dùng 3 nhóm huấn luyện chính; Phần IV (tình huống CHƯA huấn luyện trực tiếp) chỉ dùng
-#     nhóm "Khác" — khớp bảng phân bố câu hỏi trong luận văn. Muốn nới: sửa _COMPETENCY_GROUPS.
+#   - Phần I-II dùng 3 nhóm huấn luyện chính; Phần III-IV cho phép cả 4 nhóm.
 #   - "pretexting" là nhãn chung cho giả danh IT/Helpdesk.
 # ---------------------------------------------------------------------------
 _GROUP_CONTEXTS: dict[ScenarioGroup, list[BusinessContext]] = {
@@ -129,6 +131,8 @@ _GROUP_CONTEXTS: dict[ScenarioGroup, list[BusinessContext]] = {
         BusinessContext.GIFT_CARD_REQUEST, BusinessContext.GOV_AGENCY, BusinessContext.DELIVERY_FEE,
         BusinessContext.RECRUITER_PARTNER, BusinessContext.CLOUD_DOCUMENT, BusinessContext.PHYSICAL_ACCESS,
         BusinessContext.BAITING_DEVICE, BusinessContext.SURVEY_REWARD,
+        BusinessContext.COLLEAGUE_SUPPORT, BusinessContext.EMPLOYEE_BENEFITS,
+        BusinessContext.INTERNAL_RESALE,
     ],
 }
 
@@ -160,14 +164,17 @@ _CONTEXT_ATTACKS: dict[BusinessContext, list[AttackType]] = {
     _C.PHYSICAL_ACCESS: [_A.TAILGATING, _A.QUID_PRO_QUO],
     _C.BAITING_DEVICE: [_A.BAITING, _A.QUISHING],
     _C.SURVEY_REWARD: [_A.QUID_PRO_QUO, _A.PHISHING_EMAIL, _A.SMISHING],
+    _C.COLLEAGUE_SUPPORT: [_A.CHAT_IMPERSONATION, _A.PHISHING_EMAIL],
+    _C.EMPLOYEE_BENEFITS: [_A.PHISHING_EMAIL, _A.CHAT_IMPERSONATION, _A.SMISHING],
+    _C.INTERNAL_RESALE: [_A.CHAT_IMPERSONATION, _A.PHISHING_EMAIL],
 }
 
 _MAIN_GROUPS = [ScenarioGroup.LEADER, ScenarioGroup.IT, ScenarioGroup.BANK]
 _COMPETENCY_GROUPS: dict[CompetencyGroup, list[ScenarioGroup]] = {
     CompetencyGroup.SIGN_RECOGNITION: _MAIN_GROUPS,
     CompetencyGroup.MANIPULATION_RECOGNITION: _MAIN_GROUPS,
-    CompetencyGroup.RESPONSE_BEHAVIOR: _MAIN_GROUPS,
-    CompetencyGroup.PRINCIPLE_APPLICATION: [ScenarioGroup.OTHER],
+    CompetencyGroup.RESPONSE_BEHAVIOR: [*_MAIN_GROUPS, ScenarioGroup.OTHER],
+    CompetencyGroup.PRINCIPLE_APPLICATION: [*_MAIN_GROUPS, ScenarioGroup.OTHER],
 }
 
 

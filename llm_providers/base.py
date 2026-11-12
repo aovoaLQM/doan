@@ -7,7 +7,7 @@ cần biết đang chạy với provider nào.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -18,10 +18,19 @@ class LLMCallResult:
     stop_reason: Optional[str]
     input_tokens: int
     output_tokens: int
+    attempts: list[dict[str, str]] = field(default_factory=list)
 
 
 class LLMCallError(RuntimeError):
-    pass
+    def __init__(self, message, *, provider=None, model=None, status_code=None,
+                 error_kind="unknown", fallback_eligible=False, attempts=None):
+        super().__init__(message)
+        self.provider = provider
+        self.model = model
+        self.status_code = status_code
+        self.error_kind = error_kind
+        self.fallback_eligible = fallback_eligible
+        self.attempts = list(attempts or [])
 
 
 class LLMProvider(ABC):

@@ -13,7 +13,33 @@ from __future__ import annotations
 
 import json
 import random
-from schema_builder import ScenarioParams, ManipulationMechanism
+from schema_builder import ScenarioParams, ManipulationMechanism, LearnerRole
+
+
+_LEARNER_ROLES = {
+    LearnerRole.ACCOUNTANT: ("nhân viên kế toán", "xử lý chứng từ và thanh toán trong phạm vi được phân quyền"),
+    LearnerRole.IT_HELPDESK: ("nhân viên IT Helpdesk", "tiếp nhận hỗ trợ kỹ thuật và xử lý quyền truy cập theo quy trình xác minh"),
+    LearnerRole.MID_MANAGER: ("quản lý cấp trung", "điều phối công việc và phê duyệt trong phạm vi được ủy quyền"),
+    LearnerRole.RECEPTIONIST: ("lễ tân", "tiếp nhận khách, cuộc gọi, thư từ và chuyển yêu cầu tới bộ phận phụ trách; không tự thực hiện thanh toán hay cấp quyền hệ thống"),
+    LearnerRole.NEW_HIRE: ("nhân viên mới", "đang làm quen công việc và quy trình; không mặc định thuộc kế toán, văn thư hoặc có quyền thanh toán/phê duyệt"),
+    LearnerRole.HR_STAFF: ("nhân viên HR", "xử lý tuyển dụng, hồ sơ nhân sự và phúc lợi trong phạm vi được phân quyền"),
+    LearnerRole.OFFICE_STAFF: ("nhân viên văn phòng", "thực hiện công việc hành chính thông thường trong phạm vi được phân công; không mặc định là kế toán hay người phê duyệt"),
+}
+
+
+def _learner_role_block(params: ScenarioParams) -> str:
+    label, duties = _LEARNER_ROLES[params.learner_role]
+    return f"""
+VAI TRÒ NGƯỜI HỌC BẮT BUỘC:
+- Vai trò đã chọn: {label} (learner_role={params.learner_role.value}).
+- Mở đầu phải xác định đúng: "Bạn là {label} tại <tên công ty đã cấp>"; không đặt họ tên người học.
+- Phạm vi công việc: {duties}.
+- Giữ đúng vai trò này trong narrative, options và feedback; không tự đổi nghề để khớp bối cảnh.
+- Nếu bối cảnh liên quan nghiệp vụ ngoài quyền hạn, người học chỉ là người tiếp nhận/chuyển yêu cầu
+  hoặc bị dụ làm ngoài thẩm quyền; không tự gán quyền chuyển tiền, phê duyệt hay quản trị hệ thống.
+  Ví dụ lễ tân nhận yêu cầu chuyển thông tin thanh toán tới bộ phận phụ trách, nhân viên mới bị
+  thúc ép bỏ qua việc hỏi người hướng dẫn. Vẫn giữ bối cảnh và mục tiêu tấn công đã chọn.
+"""
 
 SYSTEM_PROMPT = """Bạn là một trợ lý biên soạn học liệu đào tạo an toàn thông tin nội bộ,
 chuyên thiết kế bài tập tình huống theo mô hình đánh giá 3 lớp:
@@ -114,8 +140,8 @@ CHỈ DẪN RIÊNG CHO CÂU HỎI NÀY — Phần I: Nhận diện dấu hiệu 
 - Đúng 1 option là dấu hiệu đáng ngờ NHẤT trong narrative (is_safe_choice=true, score=100,
   distractor_type="khong_ap_dung"). Đáp án đúng PHẢI suy ra được TRỰC TIẾP từ thông tin có trong
   narrative. Nếu đáp án đúng cần một MỐC ĐỐI CHIẾU (tên miền chính thức, văn phong thường ngày, giờ làm việc,
-  ngưỡng phê duyệt, quy trình...), narrative BẮT BUỘC phải nêu mốc đó bằng câu dẫn bối cảnh trung tính
-  (riêng với tên miền: nêu cả tên miền chính thức lẫn tên miền người gửi đáng ngờ) — xem quy tắc
+  ngưỡng phê duyệt, quy trình...), narrative BẮT BUỘC cung cấp đúng mốc cần thiết ở vị trí liên quan
+  (tên miền nội bộ đối chiếu ngay qua Từ/Đến, tổ chức bên ngoài cần mốc riêng khi liên quan) — xem quy tắc
   "TỰ ĐỦ DỮ KIỆN" trong khối tên hư cấu.
 - RÀNG BUỘC QUAN TRỌNG cho 2-3 option còn lại (distractor): PHẢI là chi tiết CÓ THẬT trong
   narrative nhưng TRUNG TÍNH — nghĩa là bản thân chi tiết đó KHÔNG được là một red flag nào khác
@@ -177,7 +203,7 @@ CHỈ DẪN RIÊNG CHO CÂU HỎI NÀY — Phần III: Lựa chọn hành vi ứ
 
 _PART4_CONTEXT_FROM_BRIEF = (
     "- Bối cảnh, kênh liên lạc và vai trò giả mạo ĐÃ ĐƯỢC QUY ĐỊNH trong BRIEF TÌNH HUỐNG phía trên (nhóm\n"
-    "  \"Khác\") — dùng đúng bối cảnh đó, KHÔNG đổi sang giả danh lãnh đạo / IT / ngân hàng.\n"
+    "  đã chọn) — giữ đúng nhóm và bối cảnh đó, không tự đổi nhóm kịch bản.\n"
 )
 _PART4_CONTEXT_FREE = (
     "- Bối cảnh/kênh liên lạc/vai trò giả mạo trong \"narrative\" PHẢI khác hẳn 3 nhóm huấn luyện chính\n"
@@ -204,7 +230,7 @@ _INSTRUCTION_BUILDERS = {
     "nhan_dien_dau_hieu": lambda params: _instructions_for_sign_recognition(_pick_target_flag(params)),
     "nhan_biet_co_che_thao_tung": lambda params: _instructions_for_manipulation_recognition(params.manipulation_mechanism),
     "lua_chon_hanh_vi_ung_pho": lambda params: _instructions_for_response_behavior(),
-    "van_dung_nguyen_tac": lambda params: _instructions_for_principle_application(_active_group(params) == "other"),
+    "van_dung_nguyen_tac": lambda params: _instructions_for_principle_application(_active_group(params) is not None),
 }
 
 
@@ -237,6 +263,22 @@ _COMPANIES = [
     ("Công ty TNHH Giải pháp Số Veltra", "veltra.vn"),
     ("Công ty Cổ phần Vật liệu Marlen", "marlen.vn"),
     ("Công ty TNHH Dịch vụ Tài chính Corvan", "corvan.vn"),
+    ("Công ty Cổ phần Công nghệ Sao Mộc", "saomoc.vn"),
+    ("Công ty TNHH Thương mại Mây Trắng", "maytrang.vn"),
+    ("Công ty Cổ phần Cơ khí Bắc Sơn", "cokhibacson.vn"),
+    ("Công ty TNHH Nông sản Đồng Xanh", "nongsandongxanh.vn"),
+    ("Công ty Cổ phần May mặc Hải Âu", "mayhaiau.vn"),
+    ("Công ty TNHH Thiết kế Cánh Diều", "thietkecanhdieu.vn"),
+    ("Công ty Cổ phần Vận tải Ánh Dương", "vantaianhduong.vn"),
+    ("Công ty TNHH Sản xuất Gốm Bình Minh", "gombinhminh.vn"),
+    ("Công ty Cổ phần Năng lượng Gió Nam", "gionam.vn"),
+    ("Công ty TNHH Giáo dục Hạt Mầm", "giaoduchatmam.vn"),
+    ("Công ty Cổ phần Bao bì Tre Việt", "baobitreviet.vn"),
+    ("Công ty TNHH Phần mềm Cầu Vồng", "phanmemcauvong.vn"),
+    ("Công ty Cổ phần Thực phẩm Vườn Nhà", "thucphamvuonnha.vn"),
+    ("Công ty TNHH Nội thất Gỗ Sồi", "noithatgosoi.vn"),
+    ("Công ty Cổ phần Dệt sợi Sông Lam", "detsoisonglam.vn"),
+    ("Công ty TNHH Du lịch Biển Ngọc", "dulichbienngoc.vn"),
 ]
 _PARTNERS = [
     ("Công ty TNHH Cung ứng Solvex", "solvex.vn"),
@@ -247,6 +289,22 @@ _PARTNERS = [
     ("Công ty Cổ phần Nội thất Pelvin", "pelvin.vn"),
     ("Công ty TNHH Điện lạnh Torvex", "torvex.vn"),
     ("Công ty Cổ phần In ấn Mirage Việt", "mirageviet.vn"),
+    ("Công ty TNHH Văn phòng phẩm Bút Xanh", "butxanh.vn"),
+    ("Công ty Cổ phần Thiết bị Đỉnh Núi", "thietbidinhnui.vn"),
+    ("Công ty TNHH Kho vận Bến Thành Đông", "benthanhdong.vn"),
+    ("Công ty Cổ phần In ấn Sắc Màu", "inansacmau.vn"),
+    ("Công ty TNHH Vật tư Hướng Dương", "vattuhuongduong.vn"),
+    ("Công ty Cổ phần Cung ứng Đại Ngàn", "cungungdaingan.vn"),
+    ("Công ty TNHH Điện máy Trúc Lâm", "dienmaytruclam.vn"),
+    ("Công ty Cổ phần Bao bì Lá Non", "baobilanon.vn"),
+    ("Công ty TNHH Tư vấn Đường Mới", "tuvanduongmoi.vn"),
+    ("Công ty Cổ phần Nội thất Nếp Nhà", "noithatnepnha.vn"),
+    ("Công ty TNHH Dịch vụ Cánh Én", "dichvucanhen.vn"),
+    ("Công ty Cổ phần Vận chuyển Hải Đăng", "vanchuyenhaidang.vn"),
+    ("Công ty TNHH Sản xuất Suối Nguồn", "sanxuatsuoinguon.vn"),
+    ("Công ty Cổ phần Giải pháp Cầu Nối", "giaiphapcaunoi.vn"),
+    ("Công ty TNHH Phân phối An Hòa", "phanphoianhoa.vn"),
+    ("Công ty Cổ phần Dịch vụ Thanh Trúc", "dichvuthanhtruc.vn"),
 ]
 _BANKS = [
     ("Ngân hàng ABC", "nganhangabc.vn"),
@@ -273,9 +331,9 @@ def _make_lookalike_domain(domain: str, rng: random.Random) -> str:
     """Sinh tên miền giả mạo gần giống tên miền chính thức (khác tinh tế, dễ bị bỏ sót)."""
     base, tld = domain.rsplit(".", 1)
     candidates = [
-        f"{base}-corp.com",                                   # thêm hậu tố + đổi đuôi
-        f"{base}-vn.com",                                     # thêm gạch nối + đuôi khác
-        f"{base}.com" if tld == "vn" else f"{base}.vn",       # chỉ đổi đuôi tên miền
+        f"{base}-corp.{tld}",
+        f"{base}-vn.{tld}",
+        f"{base}-mail.{tld}",
         f"{base}{base[-1]}.{tld}",                            # lặp chữ cái cuối
     ]
     swappable = [i for i in range(1, len(base) - 2)
@@ -284,7 +342,17 @@ def _make_lookalike_domain(domain: str, rng: random.Random) -> str:
         i = rng.choice(swappable)
         candidates.append(f"{base[:i]}{base[i + 1]}{base[i]}{base[i + 2:]}.{tld}")
     result = rng.choice(candidates)
-    return result if result != domain else f"{base}-corp.com"
+    return result if result != domain else f"{base}-corp.{tld}"
+
+
+_RECIPIENT_USERNAMES = (
+    "jack123", "thuyabc", "nganyz", "tom33", "duc123",
+    "linh88", "minh27", "hanhng", "nam456", "trang92",
+    "khoa21", "maiabc", "phuong09", "bao77", "vytran",
+    "huy123", "anhtuan", "ngoc35", "quynh68", "tuan99",
+    "lan24", "sonabc", "haing", "yen56", "long33",
+    "thao91", "phuc22", "kimanh", "hoang18", "dung66",
+)
 
 
 def _pick_names(params: ScenarioParams) -> dict:
@@ -295,6 +363,10 @@ def _pick_names(params: ScenarioParams) -> dict:
     bank, bank_domain = rng.choice(_BANKS)
     courier, courier_domain = rng.choice(_COURIERS)
     cloud, cloud_domain = rng.choice(_CLOUD_SERVICES)
+    company_domain, partner_domain, bank_domain, courier_domain, cloud_domain = (
+        domain.rsplit(".", 1)[0] + rng.choice((".vn", ".com", ".net"))
+        for domain in (company_domain, partner_domain, bank_domain, courier_domain, cloud_domain)
+    )
     return {
         "person_main": person_main, "person_aux": person_aux,
         "company": company, "company_domain": company_domain,
@@ -307,6 +379,7 @@ def _pick_names(params: ScenarioParams) -> dict:
         "fake_courier": _make_lookalike_domain(courier_domain, rng),
         "cloud": cloud, "cloud_domain": cloud_domain,
         "fake_cloud": _make_lookalike_domain(cloud_domain, rng),
+        "recipient_email": f"{rng.choice(_RECIPIENT_USERNAMES)}@{company_domain}",
     }
 
 
@@ -317,6 +390,24 @@ def _fictional_names_block(params: ScenarioParams, names: dict) -> str:
     bank, bank_domain, fake_bank = names["bank"], names["bank_domain"], names["fake_bank"]
     courier, courier_domain, fake_courier = names["courier"], names["courier_domain"], names["fake_courier"]
     cloud, cloud_domain, fake_cloud = names["cloud"], names["cloud_domain"], names["fake_cloud"]
+    group = params.scenario_group.value
+    ctx = params.business_context.value
+    if group == "gia_danh_lanh_dao":
+        sender_email = f"giam.doc@{fake_company}"
+    elif group == "gia_danh_it":
+        local = "nhan.vien" if params.learner_role.value == "it_helpdesk" else "it.helpdesk"
+        sender_email = f"{local}@{fake_company}"
+    elif group == "gia_danh_ngan_hang":
+        sender_email = f"cham.soc@{fake_bank}"
+    else:
+        sender_email = {
+            "dong_nghiep_nho_ho_tro": f"dong.nghiep@{fake_company}",
+            "dang_ky_cong_doan_phuc_loi": f"cong.doan@{fake_company}",
+            "mua_ban_thanh_ly_noi_bo": f"nhan.vien@{fake_company}",
+            "giao_hang_phi_theo_doi": f"giao.hang@{fake_courier}",
+            "dich_vu_dam_may_tai_lieu": f"tai.lieu@{fake_cloud}",
+            "nha_tuyen_dung_doi_tac": f"tuyen.dung@{fake_partner}",
+        }.get(ctx, f"thong.bao@{fake_partner}")
     return f"""
 BỘ TÊN HƯ CẤU DÙNG CHO BÀI NÀY (bắt buộc dùng nguyên văn, nhất quán xuyên suốt narrative,
 options, feedback và red_flags; không cần dùng hết nếu tình huống không cần nhân vật/tổ chức đó):
@@ -333,6 +424,12 @@ options, feedback và red_flags; không cần dùng hết nếu tình huống kh
 - Dịch vụ lưu trữ/ký tài liệu (nếu cần): {cloud} — địa chỉ đăng nhập chính thức: {cloud_domain}
   | tên miền GIẢ MẠO gần giống: {fake_cloud}
 Quy tắc dùng tên:
+- Chỉ với kênh email: dùng địa chỉ Từ: {sender_email}; Đến: {names['recipient_email']}.
+  Dòng người nhận chỉ viết Đến: <{names['recipient_email']}>; không thêm tên hiển thị hay họ tên người học.
+  Không suy ra tên người học từ tên tài khoản email.
+  Tên hiển thị và chữ ký vẫn dùng nhân vật cụ thể đúng vai trò; không dùng tên người để tự đặt lại địa chỉ.
+  Địa chỉ viết nguyên vẹn, không tô đậm/in nghiêng riêng ký tự khác biệt, không dùng placeholder người nhận.
+  Mọi email và tên miền mô phỏng dùng đúng tên miền đã cấp, với đuôi .vn, .com hoặc .net.
 - Chọn chức danh/quan hệ phù hợp với loại tấn công cho nhân vật (ví dụ Tổng Giám đốc, Trưởng phòng,
   kỹ thuật viên IT, chuyên viên ngân hàng); xưng hô (anh/chị/ông/bà) phải khớp giới tính của tên.
 - Tên hiển thị của người gửi trong email PHẢI là tên cụ thể kèm chức danh (ví dụ "<chức danh đúng vai của kẻ tấn công
@@ -347,10 +444,16 @@ Quy tắc dùng tên:
 QUY TẮC "TỰ ĐỦ DỮ KIỆN" (rất quan trọng — học viên CHỈ biết những gì narrative nói):
 - Nếu một dấu hiệu/đáp án dựa trên việc đối chiếu với thông tin CHÍNH THỨC (tên miền email nội bộ,
   tên miền của ngân hàng/đối tác, số tổng đài, địa chỉ website...), narrative PHẢI nêu thông tin
-  chính thức đó bằng một câu dẫn tự nhiên, trung tính như một chi tiết bối cảnh — ví dụ: "Email
-  nội bộ của công ty bạn đều có đuôi @{company_domain}", hoặc "Các thông báo trước đây của
-  {bank} đều được gửi từ @{bank_domain}", hoặc "Email tuần trước của {person_main} gửi từ
-  địa chỉ @{company_domain}". Nhờ đó học viên có căn cứ so sánh với tên miền của người gửi đáng ngờ.
+  chính thức đó ở vị trí liên quan, ngắn gọn và trung tính. Với giả danh nội bộ, dùng tên miền
+  trong dòng Đến: {names['recipient_email']} làm mốc so sánh với dòng Từ; không lặp câu mô tả
+  email nội bộ chính thức. Với tổ chức bên ngoài, tên miền người nhận KHÔNG chứng minh tên miền
+  người gửi; nếu đáp án/lời giải cần so sánh, thêm một mốc ngắn như địa chỉ gửi của thông báo trước.
+- Mở đầu chỉ 1–2 câu, tối đa 50 từ: vai trò, tổ chức và hoàn cảnh cần thiết. Đi ngay vào thông điệp.
+  Xưng hô người học là "bạn", không đặt hoặc nhắc họ tên người học. Mở đầu: "Bạn là {_LEARNER_ROLES[params.learner_role][0]}
+  tại {company}."; không suy ra nghề nghiệp từ bối cảnh hoặc địa chỉ email.
+  Chỉ thêm quy trình/mốc đối chiếu nếu đáp án hoặc lời giải cần đến; không chép toàn bộ danh sách
+  tham khảo vào narrative và không dồn quy trình lên mở đầu. Không tự thêm ngưỡng tiền hay giờ làm
+  việc không liên quan. Nếu dùng ngưỡng/thời điểm để suy luận, dữ kiện và yêu cầu phải nhất quán.
 - Không được để học viên phải "tự biết" tên miền chính thức của một tổ chức hư cấu.
 - Phần giải thích (Lớp 2) chỉ được viện dẫn thông tin CÓ TRONG narrative. Cấm dùng cách nói như
   "thường là ...", "ví dụ ..." để suy đoán tên miền/thông tin chính thức mà narrative không nêu.
@@ -408,7 +511,7 @@ def _it_channel(params: ScenarioParams) -> str:
 
 
 _CHANNEL_FORMAT_HINT = {
-    "email": "narrative là một EMAIL: nêu tên hiển thị người gửi, địa chỉ gửi (tên miền GIẢ MẠO), tiêu đề và nội dung.",
+    "email": "narrative là một EMAIL: luôn có Từ (tên hiển thị cụ thể và địa chỉ giả mạo), Đến (chỉ địa chỉ email trong dấu <>, không có họ tên người nhận), Tiêu đề và nội dung; dùng địa chỉ được cấp trong BỘ TÊN HƯ CẤU, không tô nổi chỗ khác biệt tên miền.",
     "phone_call": "narrative là một CUỘC GỌI: nêu số hiển thị trên máy, người gọi tự xưng ai, và lời thoại chính của người gọi (KHÔNG viết thành email).",
     "sms": "narrative là một TIN NHẮN SMS ngắn kèm liên kết giả (KHÔNG viết thành email dài).",
     "chat": "narrative là một CUỘC TRÒ CHUYỆN qua ứng dụng nhắn tin (như Zalo/Messenger): nêu tên hiển thị và ảnh đại diện của tài khoản, rồi các tin nhắn chính theo thứ tự (KHÔNG viết thành email).",
@@ -429,8 +532,8 @@ def _brief_it(params: ScenarioParams, names: dict) -> str:
 BRIEF TÌNH HUỐNG (bắt buộc): NGƯỜI HỌC LÀ NHÂN VIÊN IT HELPDESK của {company}. Kẻ tấn công ({person_main})
 giả danh một NHÂN VIÊN hoặc LÃNH ĐẠO của công ty để nhờ Helpdesk làm việc nhạy cảm: {_IT_REVERSE_PRETEXT[ctx]}.
 - KHÔNG đảo vai: kẻ tấn công KHÔNG giả danh IT, vì người học chính là IT.
-- Mốc đối chiếu narrative phải nêu: quy trình xác minh danh tính của Helpdesk và/hoặc việc mọi yêu cầu hỗ trợ
-  phải qua cổng ticket nội bộ; email nội bộ chính thức là @{company_domain} (email đáng ngờ dùng @{fake_company}).
+- Mốc tham khảo chỉ dùng khi đáp án/lời giải cần: quy trình xác minh danh tính của Helpdesk hoặc cổng ticket
+  nội bộ; với email, đối chiếu tên miền qua dòng Từ/Đến, không lặp mô tả tên miền ở mở đầu.
 - THƯ VIỆN DẤU HIỆU của nhóm này (red_flags chỉ chọn trong thư viện này, diễn đạt lại theo narrative, chỉ
   chọn dấu hiệu THỰC SỰ được cài trong narrative, và gán tier đúng như dưới đây):
 {rev_library}
@@ -462,8 +565,8 @@ BRIEF TÌNH HUỐNG (bắt buộc — đây là nhóm "Giả danh IT / Helpdesk"
 - Độ tinh vi theo độ khó "{level}": {_IT_SOPHISTICATION[level]}
 - Nếu có phần mềm điều khiển từ xa: gọi chung là "phần mềm điều khiển từ xa" (hoặc tên phổ biến), KHÔNG kèm
   đường dẫn tải thật.
-- Mốc đối chiếu narrative PHẢI nêu (để học viên có căn cứ): {reference_line} — viết như chi tiết bối cảnh
-  trung tính, không lộ đó là dấu hiệu.
+- Mốc tham khảo (chỉ chọn dữ kiện đáp án/lời giải cần): {reference_line}.
+  Không chép toàn bộ; với email nội bộ đối chiếu ngay qua Từ/Đến, bỏ câu mô tả tên miền ở mở đầu.
 - THƯ VIỆN DẤU HIỆU của nhóm này (red_flags chỉ chọn trong thư viện này, diễn đạt lại theo narrative, chỉ
   chọn dấu hiệu THỰC SỰ được cài trong narrative, và gán tier đúng như dưới đây):
 {it_library}
@@ -526,15 +629,15 @@ def _brief_leader(params: ScenarioParams, names: dict) -> str:
     return f"""
 BRIEF TÌNH HUỐNG (bắt buộc — đây là nhóm "Giả danh lãnh đạo (CEO Fraud / BEC)", KHÔNG phải giả danh IT hay ngân hàng):
 - Kẻ tấn công ({person_main}) GIẢ DANH một lãnh đạo cấp cao (Tổng Giám đốc / Giám đốc điều hành / Giám đốc tài
-  chính) của {company}, nhắm vào người học — nhân viên có quyền xử lý giao dịch hoặc dữ liệu. TUYỆT ĐỐI KHÔNG
+  chính) của {company}, nhắm vào người học theo đúng VAI TRÒ NGƯỜI HỌC BẮT BUỘC; không mặc định người học
+  có quyền xử lý giao dịch hoặc dữ liệu. TUYỆT ĐỐI KHÔNG
   đảo vai: kẻ tấn công không phải IT/Helpdesk hay ngân hàng, và người học không phải lãnh đạo.
 - Kênh: "email" — {_CHANNEL_FORMAT_HINT["email"]} Trường "channel" trong output PHẢI là "email".
 - Cớ tiếp cận (theo bối cảnh): {_LEADER_PRETEXT[ctx]}. Nếu cần đối tác/nhà cung cấp, dùng {partner}.
 - Độ tinh vi theo độ khó "{level}": {_LEADER_SOPHISTICATION[level]}
-- Mốc đối chiếu narrative PHẢI nêu (để học viên có căn cứ): email nội bộ chính thức của công ty là
-  @{company_domain} (email đáng ngờ dùng @{fake_company}), và quy trình thanh toán/phê duyệt của công ty (ví dụ
-  khoản chi vượt ngưỡng phải được duyệt qua hệ thống theo hai cấp; thay đổi tài khoản nhà cung cấp phải được xác
-  nhận lại) — viết như chi tiết bối cảnh trung tính, không lộ đó là dấu hiệu.
+- Mốc đối chiếu chỉ bổ sung khi đáp án/lời giải cần: so sánh tên miền Từ với Đến cho giả danh nội bộ;
+  chỉ nêu quy trình thanh toán hoặc xác minh thay đổi tài khoản nếu liên quan trực tiếp. Không mặc định
+  thêm ngưỡng tiền, phê duyệt hai cấp hoặc quy trình nhà cung cấp; dữ kiện phải khớp giao dịch trong bài.
 - THƯ VIỆN DẤU HIỆU của nhóm này (red_flags chỉ chọn trong thư viện này, diễn đạt lại theo narrative, chỉ
   chọn dấu hiệu THỰC SỰ được cài trong narrative, và gán tier đúng như dưới đây):
 {leader_library}
@@ -574,8 +677,9 @@ BRIEF TÌNH HUỐNG (bắt buộc — đây là nhóm "Giả danh ngân hàng (P
 - Kênh: "{channel}" — {_CHANNEL_FORMAT_HINT[channel]} Trường "channel" trong output PHẢI là "{channel}".
 - Cớ tiếp cận (theo bối cảnh): {bank_pretext}.
 - Độ tinh vi theo độ khó "{level}": {_BANK_SOPHISTICATION[level]}
-- Mốc đối chiếu narrative PHẢI nêu (để học viên có căn cứ): {reference_line} — viết như chi tiết bối cảnh trung
-  tính, không lộ đó là dấu hiệu. Không dùng số tài khoản/số điện thoại thật; số 4 cuối tài khoản viết dạng xxxx.
+- Mốc tham khảo (chỉ chọn dữ kiện đáp án/lời giải cần): {reference_line}.
+  Nếu cần so sánh tên miền ngân hàng, thêm một mốc chính thức ngắn; tên miền người nhận không phải mốc
+  của ngân hàng. Không dùng số tài khoản/số điện thoại thật; số 4 cuối tài khoản viết dạng xxxx.
 - THƯ VIỆN DẤU HIỆU của nhóm này (red_flags chỉ chọn trong thư viện này, diễn đạt lại theo narrative, chỉ
   chọn dấu hiệu THỰC SỰ được cài trong narrative, và gán tier đúng như dưới đây):
 {bank_library}
@@ -587,6 +691,9 @@ BRIEF TÌNH HUỐNG (bắt buộc — đây là nhóm "Giả danh ngân hàng (P
 
 
 _OTHER_PRETEXT = {
+    "dong_nghiep_nho_ho_tro": "giả danh đồng nghiệp ngang cấp (KHÔNG phải lãnh đạo hoặc IT), viện cớ không truy cập được tài khoản công ty để nhờ gửi tài liệu nội bộ hoặc cấp quyền vào tài khoản cá nhân; không biến thành lời mời xem tài liệu đám mây hay nhờ mua quà",
+    "dang_ky_cong_doan_phuc_loi": "giả danh đại diện công đoàn thông báo đăng ký phúc lợi nội bộ, dẫn đến biểu mẫu đòi dữ liệu nhạy cảm hoặc khoản phí bất thường; không phải khảo sát nhận quà",
+    "mua_ban_thanh_ly_noi_bo": "giả danh nhân viên đăng bán thanh lý thiết bị trong nhóm công ty hoặc danh sách email nội bộ, lợi dụng niềm tin đồng nghiệp và thúc ép đặt cọc trước khi xác minh người bán, quyền sở hữu và hàng hóa; không phải thiết bị bỏ quên, quà tặng hay bán hàng do lãnh đạo chỉ đạo",
     "nho_mua_the_qua_tang": "một đồng nghiệp ngang cấp hoặc người quen (KHÔNG phải lãnh đạo cấp cao) nhắn từ tài khoản chat mới, nhờ mua hộ thẻ quà tặng hoặc chuyển tiền gấp và hứa hoàn lại sau",
     "gia_danh_co_quan_nha_nuoc": "người tự xưng cán bộ công an / thuế / bảo hiểm xã hội thông báo hồ sơ của người học có vấn đề pháp lý, yêu cầu cung cấp thông tin hoặc chuyển tiền để 'xác minh, giải quyết'",
     "giao_hang_phi_theo_doi": "thông báo bưu kiện/đơn hàng đang chờ giao, yêu cầu trả một khoản phí giao hàng hoặc hải quan nhỏ qua liên kết theo dõi",
@@ -605,6 +712,9 @@ _OTHER_SOPHISTICATION = {
 
 # Mốc đối chiếu cho từng bối cảnh (format string: dùng khóa trong dict names)
 _OTHER_REFERENCE = {
+    "dong_nghiep_nho_ho_tro": "người học có kênh liên hệ nội bộ đã lưu của đồng nghiệp; công ty chỉ cho chia sẻ tài liệu công việc với tài khoản công ty đã được phê duyệt, không cấp quyền cho tài khoản cá nhân",
+    "dang_ky_cong_doan_phuc_loi": "chương trình phúc lợi được công bố trên cổng nội bộ đã biết; thông báo chính thức nêu rõ không thu phí đăng ký và không yêu cầu mật khẩu hoặc OTP; có đầu mối công đoàn trong danh bạ để xác minh độc lập",
+    "mua_ban_thanh_ly_noi_bo": "nhóm mua bán nội bộ không xác thực danh tính hay bảo chứng giao dịch; người học có thể tra danh bạ để liên hệ nhân viên bằng kênh đã biết và kiểm tra trực tiếp hàng hóa trước khi thanh toán",
     "nho_mua_the_qua_tang": "người học đã lưu số/tài khoản chat thật của người đó từ trước, và công ty quy định nhân viên không nhờ nhau mua thẻ quà tặng hay chuyển tiền cá nhân qua chat",
     "gia_danh_co_quan_nha_nuoc": "cơ quan nhà nước chỉ làm việc bằng giấy mời/văn bản chính thức gửi đến cơ quan hoặc nơi cư trú, không giải quyết hồ sơ hay thu tiền qua điện thoại/tin nhắn, và người học không biết mình có vụ việc nào đang được xử lý",
     "giao_hang_phi_theo_doi": "{courier} chỉ gửi liên kết theo dõi từ tên miền {courier_domain} (liên kết đáng ngờ dùng {fake_courier}), phí vận chuyển đã trả lúc đặt hàng, và người học biết mình có đang chờ đơn hàng hay không",
@@ -616,6 +726,9 @@ _OTHER_REFERENCE = {
 }
 
 _OTHER_SAFE = {
+    "dong_nghiep_nho_ho_tro": "không gửi tài liệu hoặc cấp quyền cho tài khoản cá nhân; xác minh với đồng nghiệp qua kênh nội bộ đã lưu, kiểm tra quyền truy cập theo quy định và báo cáo ATTT nếu có dấu hiệu giả danh.",
+    "dang_ky_cong_doan_phuc_loi": "không nhập thông tin nhạy cảm, mật khẩu, OTP hay đóng phí qua thông báo; tự mở cổng nội bộ đã biết, liên hệ đầu mối công đoàn từ danh bạ và báo cáo ATTT.",
+    "mua_ban_thanh_ly_noi_bo": "không chuyển tiền đặt cọc khi chưa xác minh; liên hệ người bán qua danh bạ nội bộ độc lập với bài đăng, kiểm tra hàng hóa và quyền sở hữu trước khi thanh toán; báo quản trị nhóm và ATTT về tài khoản giả mạo.",
     "nho_mua_the_qua_tang": "KHÔNG mua thẻ hay chuyển tiền; xác minh bằng cách gọi/nhắn qua số hoặc kênh đã lưu từ trước của người đó (không dùng tài khoản đang nhắn); đối chiếu quy định công ty; báo cáo ATTT và báo cho người bị giả mạo.",
     "gia_danh_co_quan_nha_nuoc": "ngắt cuộc gọi, không cung cấp thông tin hay chuyển tiền; xác minh trực tiếp tại cơ quan hoặc qua số tổng đài niêm yết chính thức; báo cáo ATTT và người thân/đồng nghiệp.",
     "giao_hang_phi_theo_doi": "không bấm liên kết, không nhập thông tin thẻ; kiểm tra đơn hàng trong ứng dụng/trang chính thức của đơn vị vận chuyển (mở bằng địa chỉ đã biết); báo cáo ATTT.",
@@ -657,8 +770,8 @@ BRIEF TÌNH HUỐNG (bắt buộc — đây là nhóm "Khác: tình huống mớ
 - Kênh: "{channel}" — {_CHANNEL_FORMAT_HINT[channel]} Trường "channel" trong output PHẢI là "{channel}".
 - Cớ tiếp cận (theo bối cảnh): {_OTHER_PRETEXT[ctx]}.
 - Độ tinh vi theo độ khó "{level}": {_OTHER_SOPHISTICATION[level]}
-- Mốc đối chiếu narrative PHẢI nêu (để học viên có căn cứ): {reference_line} — viết như chi tiết bối cảnh
-  trung tính, không lộ đó là dấu hiệu.
+- Mốc tham khảo (chỉ chọn dữ kiện đáp án/lời giải cần): {reference_line}.
+  Chỉ nêu dữ kiện liên quan ở vị trí cần thiết, không chép toàn bộ vào mở đầu.
 - THƯ VIỆN DẤU HIỆU của nhóm này (red_flags chỉ chọn trong thư viện này, diễn đạt lại theo narrative, chỉ
   chọn dấu hiệu THỰC SỰ được cài trong narrative, và gán tier đúng như dưới đây):
 {other_library}
@@ -794,6 +907,12 @@ _G, _GOV, _DEL, _REC, _CLD, _PHY, _BAIT, _SUR = (
 )
 _RED_FLAG_LIBRARY["other"] = {
     "co_ban": [
+        ("nhờ gửi tài liệu nội bộ hoặc cấp quyền cho tài khoản cá nhân", None, ("dong_nghiep_nho_ho_tro",)),
+        ("tài khoản lạ tự xưng đồng nghiệp để nhờ hỗ trợ", None, ("dong_nghiep_nho_ho_tro",)),
+        ("đòi mật khẩu hoặc OTP trong biểu mẫu đăng ký phúc lợi", None, ("dang_ky_cong_doan_phuc_loi",)),
+        ("thu phí đăng ký dù thông báo phúc lợi chính thức nói miễn phí", None, ("dang_ky_cong_doan_phuc_loi",)),
+        ("thúc ép chuyển tiền đặt cọc trước khi kiểm tra hàng thanh lý", None, ("mua_ban_thanh_ly_noi_bo",)),
+        ("giá thanh lý thấp bất thường so với tình trạng thiết bị được mô tả", None, ("mua_ban_thanh_ly_noi_bo",)),
         ("áp lực thời gian, nhấn mạnh phải làm ngay", None, None),
         ("tài khoản chat hoặc số điện thoại mới/lạ nhưng xưng là người quen hay đồng nghiệp", None, _G),
         ("nhờ mua thẻ quà tặng hoặc chuyển tiền gấp và hứa hoàn lại sau", None, _G),
@@ -814,6 +933,12 @@ _RED_FLAG_LIBRARY["other"] = {
     ],
     "trung_binh": [
         ("đề nghị chuyển sang kênh khác hoặc làm ngoài quy trình thông thường", None, None),
+        ("viện cớ mất quyền truy cập để bỏ qua quy trình chia sẻ tài liệu", None, ("dong_nghiep_nho_ho_tro",)),
+        ("từ chối xác nhận qua kênh nội bộ đã biết của đồng nghiệp", None, ("dong_nghiep_nho_ho_tro",)),
+        ("biểu mẫu phúc lợi yêu cầu dữ liệu nhạy cảm không liên quan quyền lợi", None, ("dang_ky_cong_doan_phuc_loi",)),
+        ("yêu cầu đóng phí phúc lợi vào tài khoản cá nhân ngoài quy trình", None, ("dang_ky_cong_doan_phuc_loi",)),
+        ("người bán từ chối cho kiểm tra hàng hoặc xác minh qua danh bạ nội bộ", None, ("mua_ban_thanh_ly_noi_bo",)),
+        ("lấy lý do nhiều người đang chờ mua để yêu cầu bỏ qua xác minh", None, ("mua_ban_thanh_ly_noi_bo",)),
         ("viện cớ không nghe máy được để người học không thể xác nhận", None, _G),
         ("yêu cầu gửi mã thẻ quà tặng thay vì chuyển khoản thông thường", None, _G),
         ("yêu cầu giữ bí mật vụ việc, không báo cho người thân hay cơ quan", None, _GOV),
@@ -833,6 +958,9 @@ _RED_FLAG_LIBRARY["other"] = {
     ],
     "nang_cao": [
         ("kết hợp nhiều cơ chế tâm lý cùng lúc", None, None),
+        ("biết đúng dự án nhưng yêu cầu cấp quyền tài liệu ra ngoài phạm vi được phê duyệt", None, ("dong_nghiep_nho_ho_tro",)),
+        ("dùng đúng tên chương trình phúc lợi nhưng hướng dẫn đăng ký khác thông báo trên cổng nội bộ", None, ("dang_ky_cong_doan_phuc_loi",)),
+        ("dùng hồ sơ nhân viên có vẻ hợp lệ để khiến người mua bỏ qua việc xác minh tài khoản nhận cọc", None, ("mua_ban_thanh_ly_noi_bo",)),
         ("biết thông tin cá nhân hoặc công việc của người học lấy từ mạng xã hội", None, _G),
         ("tin nhắn nối tiếp một cuộc trò chuyện thật trước đó", None, _G),
         ("đọc đúng họ tên và thông tin hồ sơ của người học", None, _GOV),
@@ -948,8 +1076,9 @@ def _target_flag_block(target: tuple[str, str] | None) -> str:
     đã chọn ở trên. Nếu narrative vẫn chứa các dấu hiệu khác (ví dụ email gửi từ tên miền giả mạo), các
     dấu hiệu đó KHÔNG được xuất hiện trong bất kỳ option nào.
   + Nếu dấu hiệu này cần mốc đối chiếu (tên miền chính thức, văn phong thường ngày của người gửi, giờ làm
-    việc thông thường, ngưỡng phê duyệt, quy trình thanh toán/hỗ trợ...), narrative PHẢI nêu mốc đó bằng câu
-    dẫn bối cảnh trung tính để học viên suy ra được đáp án.
+    việc thông thường, ngưỡng phê duyệt, quy trình thanh toán/hỗ trợ...), narrative PHẢI cung cấp đúng mốc
+    cần thiết ở vị trí liên quan, ngắn gọn và trung tính. Với tên miền nội bộ, dùng dòng Từ/Đến;
+    không bắt buộc viết thêm câu dẫn ở mở đầu. Với ngưỡng phê duyệt, số tiền phải khớp điều kiện vi phạm.
 """
 
 
@@ -996,6 +1125,7 @@ def build_user_prompt(params: ScenarioParams) -> str:
     instructions = (
         "Hãy soạn MỘT bài tập tình huống 3 lớp (Challenge/Explanation/Transferable Knowledge) "
         "về nhận diện social engineering dựa trên tham số JSON dưới đây.\n"
+        f"{_learner_role_block(params)}\n"
         f"{brief}\n"
         f"{specific_instructions}\n"
         f"{names_block}\n"

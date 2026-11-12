@@ -7,6 +7,7 @@ from google import genai
 from google.genai import types
 
 from .base import LLMProvider, LLMCallResult, LLMCallError
+from .errors import normalize_error
 
 
 class GeminiProvider(LLMProvider):
@@ -16,9 +17,22 @@ class GeminiProvider(LLMProvider):
     API key: đặt biến môi trường GEMINI_API_KEY hoặc truyền trực tiếp.
     """
 
-    def __init__(self, model: str = "gemini-2.5-flash", api_key: Optional[str] = None):
+    def __init__(self, model: str = "gemini-2.5-flash", api_key: Optional[str] = None, *, fallback_mode: bool = False):
         self.model = model
-        self.client = genai.Client(api_key=api_key or os.environ.get("GEMINI_API_KEY"))
+        self.client = genai.Client(
+            api_key=api_key or os.environ.get("GEMINI_API_KEY"),
+            http_options=types.HttpOptions(
+                timeout=60000,  # mili giây, giới hạn thời gian chờ mỗi lần gọi
+                retry_options=types.HttpRetryOptions(
+                    attempts=1 if fallback_mode else 4,
+                    initial_delay=2.0,
+                    max_delay=10.0,
+                    exp_base=2.0,
+                    jitter=1.0,
+                    http_status_codes=[408, 429, 500, 502, 503, 504],
+                ),
+            ),
+        )
 
     def generate(self, system_prompt: str, user_prompt: str, max_tokens: int = 2000) -> LLMCallResult:
         try:
@@ -33,7 +47,7 @@ class GeminiProvider(LLMProvider):
                 ),
             )
         except Exception as e:  # noqa: BLE001
-            raise LLMCallError(f"Lỗi gọi Gemini API: {e}") from e
+            raise normalize_error(e, "gemini", self.model) from e
 
         raw_text = (response.text or "").strip()
         if not raw_text:
